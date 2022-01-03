@@ -43,7 +43,7 @@ def main():
         raise Exception('config file at: {} not found'.format(args.config))
 
     modifier = LookMlModifier(config)
-    modifier.modify(args.infile, args.outfile)
+    modifier.modify_elements(args.infile, args.outfile)
 
 if __name__ == '__main__':
     main()

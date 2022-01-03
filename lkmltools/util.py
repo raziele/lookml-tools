@@ -12,3 +12,7 @@ class FieldCategory(Enum):
     DIMENSION_GROUP = "dimension_group"
     MEASURE = "measure"
     DESCRIPTION = "description"
+    LABEL = 'label'
+    FIELD_TYPE = 'field_type'
+    SQL = 'sql'
+

@@ -12,7 +12,9 @@ from lkmltools.updater.file_modifier import FileModifier
 from lkmltools.util import FieldCategory
 from lkmltools.lookml import LookML
 from lkmltools.updater.definitions_provider_factory import DefinitionsProviderFactory
+import re
 
+import bpdb
 class LookMlModifier():
     '''
         class that understands additions or modifications to be made and then delegates
@@ -94,7 +96,6 @@ class LookMlModifier():
         modifier = FileModifier(infilepath)
 
         lookml = LookML(infilepath)
-
         # get definitions for this file. In some cases, we might not
         # easily know the full path (such as full_auto_updater.sh which
         # uses timestamp in the git clone). Thus, just match on basename
@@ -105,6 +106,7 @@ class LookMlModifier():
             defs = self.definitions[self.definitions.file == infilepath]
 
         for definition in defs.T.to_dict().values():
+            bpdb.set_trace()
             logging.info("Processing %s: %s", definition['type'], definition['name'])
 
             description, has_key = self.find_description(lookml, definition['type'], definition['name'])
@@ -128,3 +130,117 @@ class LookMlModifier():
                 modifier.modify(num_lines, definition['type'], definition['name'], exepected_description, has_key)
 
         modifier.write(outfilepath)
+
+
+    def modify_element(self, modifier, lookml, row, element_name):
+
+        element, has_key = self.find_element(lookml, row['type'], row['name'], element_name)
+        num_lines = len(element.split("\n"))
+
+        if has_key:
+            logging.info("Existing description for %s.%s: '%s'", row['type'], row['name'], element)
+        else:
+            logging.info("No description for %s.%s", row['type'], row['name'])
+
+        expected_element = row[element_name]
+
+        if element != expected_element:
+            if has_key:
+                logging.info("Update needed: %s.%s -> '%s'", row['type'], row['name'], expected_element)
+                logging.info("This is %d line existing element", num_lines)
+            else:
+                logging.info("Injection needed: %s.%s -> '%s'", row['type'], row['name'], expected_element)
+
+            modifier.modify(num_lines, row['type'], row['name'], expected_element, has_key)
+
+
+    def find_element(self, lookml, header_type, header_name, element_name):
+        '''get the element "element_name", if any, from this measure or dimension
+
+        Args:
+            lookml (LookML): instance of LookML
+            header_type (str): 'measure' or 'dimension'
+            header_name (str): name of measure or dimension            
+
+        Returns:
+            element (str): "element_name" value, if any, from dimension, dimension_group, or measure
+            boolean: whether it has one
+
+        '''
+        if lookml.filetype != "view":
+            raise Exception("Only views are supported. This is type " + lookml.filetype)
+
+        # coding standards say that we should have one view per file
+        n = len(lookml.views())
+        if n > 1:
+            raise Exception("There should only 1 view. We found %d" % n) 
+
+        v = lookml.views()[0]
+
+        if header_type not in [FieldCategory.DIMENSION.value,  FieldCategory.DIMENSION_GROUP.value, FieldCategory.MEASURE.value]:
+            raise Exception("Unrecognized header_type %s" % header_type)
+
+        plural_key = header_type + "s"
+        if not plural_key in v:
+            raise IOError("Did not find %s %s" % (header_type, header_name))
+
+        found = False
+        for d in v[plural_key]:
+            if d['name'] == header_name:
+                found=True
+                break
+        if not found:
+            raise IOError("Did not find %s %s" % (header_type, header_name))
+        
+        if FieldCategory(element_name).value in d:
+            return d[FieldCategory(element_name).value], True
+        else:
+            return "", False
+
+    def modify_elements(self, infilepath, outfilepath):
+        '''modify the LookML
+
+        Notes:
+            default behavior is to match on full path when matching LookML files
+            with the definitions source. 
+            However, you can configure to match on LookML file basename by setting
+            ``"use_basename": true`` in the config
+
+        Args:
+            infilepath (str): path to input LookML file
+            outfilepath (str): path of updated LookML to wtite to
+
+        Returns:
+            nothing. Writes out modified file contents to file
+
+        '''
+        modifier = FileModifier(infilepath)
+
+        lookml = LookML(infilepath)
+        # get definitions for this file. In some cases, we might not
+        # easily know the full path (such as full_auto_updater.sh which
+        # uses timestamp in the git clone). Thus, just match on basename
+        if 'use_basename' in self.config and self.config['use_basename']:
+            logging.info("Matching files based on basename")
+            ile = os.path.basename(infilepath)
+        elif 'use_regex' in self.config and self.config['use_regex']:
+            filepath_regex = re.compile(self.config['use_regex'])
+            file = filepath_regex.match(infilepath).groups()[0]
+        else:
+            file = infilepath
+        
+        defs = self.definitions[self.definitions.file == file]
+        
+        for row in defs.T.to_dict().values():
+            logging.info("Processing %s: %s", row['type'],row['name'])
+            
+            for r in row.keys():
+                if r in ['type', 'name', 'file']: 
+                    # these fields are not to be modified
+                    continue
+                self.modify_element(modifier, lookml, row, r)
+
+            
+        modifier.write(outfilepath)
+
+
